@@ -948,40 +948,48 @@ ssize_t Rio_readlineb(rio_t *rp, void *usrbuf, size_t maxlen)
  */
 /* $begin open_clientfd */
 int open_clientfd(char *hostname, char *port) {
-    int clientfd, rc;
-    struct addrinfo hints, *listp, *p;
+    int clientfd; // 서버와 연결될 클라이언트 소켓의 파일 디스크립터
+    struct addrinfo hints, *listp, *p; // 주소 정보를 위한 구조체 및 포인터
 
     /* Get a list of potential server addresses */
+    // getaddrinfo 함수에 전달할 힌트(제약 조건) 구조체를 0으로 초기화
     memset(&hints, 0, sizeof(struct addrinfo));
-    hints.ai_socktype = SOCK_STREAM;  /* Open a connection */
-    hints.ai_flags = AI_NUMERICSERV;  /* ... using a numeric port arg. */
-    hints.ai_flags |= AI_ADDRCONFIG;  /* Recommended for connections */
-    if ((rc = getaddrinfo(hostname, port, &hints, &listp)) != 0) {
-        fprintf(stderr, "getaddrinfo failed (%s:%s): %s\n", hostname, port, gai_strerror(rc));
-        return -2;
-    }
-  
+    // 스트림 소켓(TCP) 타입을 지정하여 연결 지향 통신을 위한 주소 정보를 요청
+    hints.ai_socktype = SOCK_STREAM;
+    // 포트 인수는 반드시 숫자 문자열이어야 함을 명시 (예: "80" 대신 "http" 사용 시 오류)
+    hints.ai_flags = AI_NUMERICSERV;
+    // 로컬 호스트의 네트워크 설정(IPv4 또는 IPv6)에 맞는 IP 주소만 반환하도록 권장 (선택적)
+    hints.ai_flags |= AI_ADDRCONFIG;
+    // getaddrinfo를 호출하여 주어진 호스트 이름과 포트에 해당하는 서버 주소 목록을 얻음
+    // listp는 addrinfo 구조체의 연결 리스트 시작을 가리킴
+    Getaddrinfo(hostname, port, &hints, &listp); // CSAPP 래퍼 함수 (오류 시 자동 종료)
+
     /* Walk the list for one that we can successfully connect to */
+    // getaddrinfo가 반환한 주소 목록을 순회하며 연결 가능한 주소를 찾음
     for (p = listp; p; p = p->ai_next) {
         /* Create a socket descriptor */
-        if ((clientfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) < 0) 
-            continue; /* Socket failed, try the next */
+        // 현재 addrinfo 구조체(p)의 정보로 소켓을 생성
+        // ai_family(IPv4/IPv6), ai_socktype(TCP), ai_protocol을 사용
+        if ((clientfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) < 0)
+            continue; /* 소켓 생성 실패 시, 현재 주소는 건너뛰고 다음 주소로 시도 */
 
         /* Connect to the server */
-        if (connect(clientfd, p->ai_addr, p->ai_addrlen) != -1) 
-            break; /* Success */
-        if (close(clientfd) < 0) { /* Connect failed, try another */  //line:netp:openclientfd:closefd
-            fprintf(stderr, "open_clientfd: close failed: %s\n", strerror(errno));
-            return -1;
-        } 
-    } 
+        // 생성된 소켓(clientfd)으로 서버에 연결을 시도
+        // p->ai_addr은 서버의 소켓 주소 구조체, p->ai_addrlen은 그 크기
+        if (connect(clientfd, p->ai_addr, p->ai_addrlen) != -1)
+            break; /* 연결 성공 시 루프를 즉시 종료 */
+        // 연결 실패 시, 현재 실패한 소켓 디스크립터를 닫고 다음 주소로 시도
+        Close(clientfd); /* CSAPP 래퍼 함수 (오류 시 자동 종료) */
+    }
 
     /* Clean up */
-    freeaddrinfo(listp);
+    // getaddrinfo가 할당했던 메모리(addrinfo 리스트)를 해제
+    Freeaddrinfo(listp); // CSAPP 래퍼 함수
+    // p가 NULL이면, 모든 주소에 대한 연결 시도가 실패했음을 의미
     if (!p) /* All connects failed */
-        return -1;
-    else    /* The last connect succeeded */
-        return clientfd;
+        return -1; // 연결 실패 반환
+    else /* The last connect succeeded */
+        return clientfd; // 성공적으로 연결된 소켓 디스크립터 반환
 }
 /* $end open_clientfd */
 
@@ -994,52 +1002,65 @@ int open_clientfd(char *hostname, char *port) {
  *       -1 with errno set for other errors.
  */
 /* $begin open_listenfd */
-int open_listenfd(char *port) 
+int open_listenfd(char *port)
 {
-    struct addrinfo hints, *listp, *p;
-    int listenfd, rc, optval=1;
+    struct addrinfo hints, *listp, *p; // 주소 정보를 위한 구조체 및 포인터
+    int listenfd, optval=1; // 리스닝 소켓 디스크립터, 소켓 옵션 값 (SO_REUSEADDR용)
 
     /* Get a list of potential server addresses */
+    // getaddrinfo 함수에 전달할 힌트(제약 조건) 구조체를 0으로 초기화
     memset(&hints, 0, sizeof(struct addrinfo));
-    hints.ai_socktype = SOCK_STREAM;             /* Accept connections */
-    hints.ai_flags = AI_PASSIVE | AI_ADDRCONFIG; /* ... on any IP address */
-    hints.ai_flags |= AI_NUMERICSERV;            /* ... using port number */
-    if ((rc = getaddrinfo(NULL, port, &hints, &listp)) != 0) {
-        fprintf(stderr, "getaddrinfo failed (port %s): %s\n", port, gai_strerror(rc));
-        return -2;
-    }
+    // 스트림 소켓(TCP) 타입을 지정하여 연결 지향 통신을 위한 주소 정보를 요청
+    hints.ai_socktype = SOCK_STREAM;
+    // AI_PASSIVE: 서버 소켓용 주소 정보를 요청 (와일드카드 IP 주소 사용)
+    // AI_ADDRCONFIG: 로컬 호스트의 네트워크 설정에 맞는 IP 주소만 반환하도록 권장
+    hints.ai_flags = AI_PASSIVE | AI_ADDRCONFIG;
+    // 포트 인수는 반드시 숫자 문자열이어야 함을 명시
+    hints.ai_flags |= AI_NUMERICSERV;
+    // getaddrinfo를 호출하여 서버가 바인딩할 주소 목록을 얻음
+    // NULL: 호스트 이름은 지정하지 않음 (AI_PASSIVE 플래그와 함께 사용 시 와일드카드 IP 주소 의미)
+    // listp는 addrinfo 구조체의 연결 리스트 시작을 가리킴
+    Getaddrinfo(NULL, port, &hints, &listp); // CSAPP 래퍼 함수 (오류 시 자동 종료)
 
     /* Walk the list for one that we can bind to */
+    // getaddrinfo가 반환한 주소 목록을 순회하며 바인딩 가능한 주소를 찾음
     for (p = listp; p; p = p->ai_next) {
         /* Create a socket descriptor */
-        if ((listenfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) < 0) 
-            continue;  /* Socket failed, try the next */
+        // 현재 addrinfo 구조체(p)의 정보로 소켓을 생성
+        // ai_family(IPv4/IPv6), ai_socktype(TCP), ai_protocol을 사용
+        if ((listenfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) < 0)
+            continue; /* 소켓 생성 실패 시, 현재 주소는 건너뛰고 다음 주소로 시도 */
 
         /* Eliminates "Address already in use" error from bind */
-        setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR,    //line:netp:csapp:setsockopt
-                   (const void *)&optval , sizeof(int));
+        // SO_REUSEADDR 옵션을 설정하여 서버 종료 후 포트를 즉시 재사용할 수 있도록 함
+        // ㅋ"Address already in use" 오류를 방지하고 디버깅을 용이하게 함
+        Setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR,
+                   (const void *)&optval , sizeof(int)); // CSAPP 래퍼 함수 (오류 시 자동 종료)
 
         /* Bind the descriptor to the address */
+        // 생성된 소켓(listenfd)에 IP 주소와 포트 번호를 바인딩
         if (bind(listenfd, p->ai_addr, p->ai_addrlen) == 0)
-            break; /* Success */
-        if (close(listenfd) < 0) { /* Bind failed, try the next */
-            fprintf(stderr, "open_listenfd close failed: %s\n", strerror(errno));
-            return -1;
-        }
+            break; /* 바인딩 성공 시 루프를 즉시 종료 */
+        // 바인딩 실패 시, 현재 실패한 소켓 디스크립터를 닫고 다음 주소로 시도
+        Close(listenfd); /* CSAPP 래퍼 함수 (오류 시 자동 종료) */
     }
-
 
     /* Clean up */
-    freeaddrinfo(listp);
+    // getaddrinfo가 할당했던 메모리(addrinfo 리스트)를 해제
+    Freeaddrinfo(listp); // CSAPP 래퍼 함수
+    // p가 NULL이면, 모든 주소에 대한 소켓 생성 및 바인딩 시도가 실패했음을 의미
     if (!p) /* No address worked */
-        return -1;
+        return -1; // 리스닝 소켓 생성 실패 반환
 
     /* Make it a listening socket ready to accept connection requests */
-    if (listen(listenfd, LISTENQ) < 0) {
-        close(listenfd);
-	return -1;
+    // 바인딩된 소켓(listenfd)을 리스닝 소켓으로 전환하여 클라이언트 연결 요청을 받을 준비를 함
+    // LISTENQ: 커널이 대기시킬 수 있는 최대 클라이언트 연결 요청의 개수 (백로그 큐 크기)
+    if (listen(listenfd, LISTENQ) < 0) { // CSAPP 래퍼 함수 (오류 시 자동 종료)
+        Close(listenfd); // listen 실패 시 소켓 닫고
+        return -1; // 실패 반환
     }
-    return listenfd;
+
+    return listenfd; // 성공적으로 준비된 리스닝 소켓 디스크립터 반환
 }
 /* $end open_listenfd */
 
