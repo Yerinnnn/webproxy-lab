@@ -1,0 +1,11 @@
+# Object files
+*.o
+
+# Executables
+echo
+echoclient
+echoserver
+
+# Editor/OS artifacts
+*~
+.DS_Store

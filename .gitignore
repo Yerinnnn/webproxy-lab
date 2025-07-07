@@ -1,3 +1,6 @@
+.vscode/
+file_tree.py
+
 # Targets
 tiny/tiny
 tiny/cgi-bin/adder
