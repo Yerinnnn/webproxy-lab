@@ -1,5 +1,6 @@
 .vscode/
 file_tree.py
+docs/
 
 # Targets
 tiny/tiny
